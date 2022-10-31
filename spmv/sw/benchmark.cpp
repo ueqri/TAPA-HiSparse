@@ -36,7 +36,7 @@ void spmv(
     unsigned num_partitions,                       // in
     unsigned num_col_partitions,                   // in
     unsigned row_partition_idx,                    // in
-    unsigned rows_per_c_in_partition
+    unsigned rows_per_c_in_partition               // in
 );
 
 template <typename T>

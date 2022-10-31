@@ -906,6 +906,9 @@
                     valid = true;
                 }
             } else {
+                #ifndef __SYNTHESIS__
+                pld = (UPDATE_PLD_T){0,0,0,0};
+                #endif
                 valid = false;
             }
 

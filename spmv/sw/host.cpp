@@ -33,7 +33,7 @@ void spmv(
     unsigned num_partitions,                       // in
     unsigned num_col_partitions,                   // in
     unsigned row_partition_idx,                    // in
-    unsigned rows_per_c_in_partition
+    unsigned rows_per_c_in_partition               // in
 );
 
 template <typename T>
@@ -455,7 +455,7 @@ bool test_transformer_95_t(std::string bitstream) {
 //---------------------------------------------------------------
 
 int main (int argc, char** argv) {
-    std::string bitstream = argv[1];
+    std::string bitstream = argc == 2 ? argv[1] : "";
 
     bool passed = true;
     passed = passed && test_basic(bitstream);
