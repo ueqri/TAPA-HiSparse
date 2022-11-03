@@ -358,15 +358,13 @@
         const EDGE_PLD_T in_pld[PACK_SIZE],
         EDGE_PLD_T resend_pld[PACK_SIZE],
         const ap_uint<PACK_SIZE> in_valid,
-        ap_uint<1> in_resend[PACK_SIZE],
+        ap_uint<PACK_SIZE> &in_resend,
         unsigned xbar_sel[PACK_SIZE],
         ap_uint<PACK_SIZE> &out_valid,
         const unsigned rotate_priority
     ) {
         #pragma HLS pipeline II=1 enable_flush
         #pragma HLS latency min=ARBITER_LATENCY max=ARBITER_LATENCY
-
-        #pragma HLS array_partition variable=in_pld complete
         #pragma HLS array_partition variable=xbar_sel complete
 
         // prioritized valid and addr
@@ -423,15 +421,13 @@
         const UPDATE_PLD_T in_pld[PACK_SIZE],
         UPDATE_PLD_T resend_pld[PACK_SIZE],
         const ap_uint<PACK_SIZE> in_valid,
-        ap_uint<1> in_resend[PACK_SIZE],
+        ap_uint<PACK_SIZE> &in_resend,
         unsigned xbar_sel[PACK_SIZE],
         ap_uint<PACK_SIZE> &out_valid,
         const unsigned rotate_priority
     ) {
         #pragma HLS pipeline II=1 enable_flush
         #pragma HLS latency min=ARBITER_LATENCY max=ARBITER_LATENCY
-
-        #pragma HLS array_partition variable=in_pld complete
         #pragma HLS array_partition variable=xbar_sel complete
 
         // prioritized valid and addr
@@ -498,7 +494,7 @@
         tapa::istreams<EDGE_PLD_T, PACK_SIZE> &input_lanes,
         tapa::ostreams<EDGE_PLD_T, PACK_SIZE> &output_lanes
     ) {
-        const unsigned shuffler_extra_iters = (ARBITER_LATENCY + 1) * PACK_SIZE;
+        const unsigned shuffler_extra_iters = (ARBITER_LATENCY + 1) * 2 * PACK_SIZE;
         // pipeline control variables
         ap_uint<PACK_SIZE> fetch_complete = 0;
         unsigned loop_extra_iters = shuffler_extra_iters;
@@ -511,13 +507,24 @@
         ap_uint<PACK_SIZE> valid = 0;
 
         // resend control
-        EDGE_PLD_T payload_resend[PACK_SIZE];
-        #pragma HLS array_partition variable=payload_resend complete
-        ap_uint<1> resend[PACK_SIZE];
-        #pragma HLS array_partition variable=resend complete
+        #define SF_REG (ARBITER_LATENCY+2)
+        EDGE_PLD_T payload_resend[SF_REG][PACK_SIZE];
+        #pragma HLS array_partition variable=payload_resend type=complete dim=0
+        ap_uint<PACK_SIZE> resend[SF_REG];
+        #pragma HLS array_partition variable=resend type=complete dim=0
+
+        for (unsigned k = 0; k < SF_REG; k++) {
+            #pragma HLS unroll
+            resend[k] = 0;
+        }
+
+        shuffler_resend_payload_resend_reset_unroll:
         for (unsigned i = 0; i < PACK_SIZE; i++) {
             #pragma HLS unroll
-            resend[i] = 0;
+            for (unsigned k = 0; k < SF_REG; k++) {
+                #pragma HLS unroll
+                payload_resend[k][i] = (EDGE_PLD_T){0,0,0,0};
+            }
         }
 
         // arbiter outputs
@@ -531,14 +538,15 @@
         loop_shuffle_pipeline:
         while (!loop_exit) {
             #pragma HLS pipeline II=1
-            #pragma HLS dependence variable=resend inter RAW true distance=6
-            #pragma HLS dependence variable=payload_resend inter RAW true distance=6
+            #pragma HLS dependence variable=resend intra true
+            #pragma HLS dependence variable=payload_resend intra true
 
+            // Fetch stage (F)
             for (unsigned ILid = 0; ILid < PACK_SIZE; ILid++) {
                 #pragma HLS unroll
-                if (resend[ILid]) {
+                if (resend[0][ILid]) {
                     valid[ILid] = 1;
-                    payload[ILid] = payload_resend[ILid];
+                    payload[ILid] = payload_resend[0][ILid];
                 } else if (fetch_complete[ILid]) {
                     valid[ILid] = 0;
                     payload[ILid] = (EDGE_PLD_T){0,0,0,0};
@@ -572,13 +580,26 @@
             }
             // ------- end of F stage
 
+            for (unsigned k = 0; k < SF_REG - 1; ++k) {
+                #pragma HLS unroll
+                resend[k] = resend[k + 1];
+            }
+
+            for (unsigned k = 0; k < SF_REG - 1; ++k) {
+                #pragma HLS unroll
+                for (unsigned i = 0; i < PACK_SIZE; i++) {
+                    #pragma HLS unroll
+                    payload_resend[k][i] = payload_resend[k + 1][i];
+                }
+            }
+
             // Arbiter stage (A) pipeline arbiter, depth = 6
             rotate_priority = next_rotate_priority;
             arbiter_for_read_req(
                 payload,
-                payload_resend,
+                payload_resend[SF_REG - 1], // as return value
                 valid,
-                resend,
+                resend[SF_REG - 1], // as return value
                 xbar_sel,
                 xbar_valid,
                 rotate_priority
@@ -611,7 +632,7 @@
         tapa::istreams<UPDATE_PLD_T, PACK_SIZE> &input_lanes,
         tapa::ostreams<UPDATE_PLD_T, PACK_SIZE> &output_lanes
     ) {
-        const unsigned shuffler_extra_iters = (ARBITER_LATENCY + 1) * PACK_SIZE;
+        const unsigned shuffler_extra_iters = (ARBITER_LATENCY + 1) * 2 * PACK_SIZE;
         // pipeline control variables
         ap_uint<PACK_SIZE> fetch_complete = 0;
         unsigned loop_extra_iters = shuffler_extra_iters;
@@ -624,13 +645,24 @@
         ap_uint<PACK_SIZE> valid = 0;
 
         // resend control
-        UPDATE_PLD_T payload_resend[PACK_SIZE];
-        #pragma HLS array_partition variable=payload_resend complete
-        ap_uint<1> resend[PACK_SIZE];
-        #pragma HLS array_partition variable=resend complete
+        #define SF_REG (ARBITER_LATENCY+2)
+        UPDATE_PLD_T payload_resend[SF_REG][PACK_SIZE];
+        #pragma HLS array_partition variable=payload_resend type=complete dim=0
+        ap_uint<PACK_SIZE> resend[SF_REG];
+        #pragma HLS array_partition variable=resend type=complete dim=0
+
+        for (unsigned k = 0; k < SF_REG; k++) {
+            #pragma HLS unroll
+            resend[k] = 0;
+        }
+
+        shuffler_resend_payload_resend_reset_unroll:
         for (unsigned i = 0; i < PACK_SIZE; i++) {
             #pragma HLS unroll
-            resend[i] = 0;
+            for (unsigned k = 0; k < SF_REG; k++) {
+                #pragma HLS unroll
+                payload_resend[k][i] = (UPDATE_PLD_T){0,0,0,0};
+            }
         }
 
         // arbiter outputs
@@ -644,14 +676,15 @@
         loop_shuffle_pipeline:
         while (!loop_exit) {
             #pragma HLS pipeline II=1
-            #pragma HLS dependence variable=resend inter RAW true distance=6
-            #pragma HLS dependence variable=payload_resend inter RAW true distance=6
+            #pragma HLS dependence variable=resend intra true
+            #pragma HLS dependence variable=payload_resend intra true
 
+            // Fetch stage (F)
             for (unsigned ILid = 0; ILid < PACK_SIZE; ILid++) {
                 #pragma HLS unroll
-                if (resend[ILid]) {
+                if (resend[0][ILid]) {
                     valid[ILid] = 1;
-                    payload[ILid] = payload_resend[ILid];
+                    payload[ILid] = payload_resend[0][ILid];
                 } else if (fetch_complete[ILid]) {
                     valid[ILid] = 0;
                     payload[ILid] = (UPDATE_PLD_T){0,0,0,0};
@@ -685,13 +718,26 @@
             }
             // ------- end of F stage
 
+            for (unsigned k = 0; k < SF_REG - 1; ++k) {
+                #pragma HLS unroll
+                resend[k] = resend[k + 1];
+            }
+
+            for (unsigned k = 0; k < SF_REG - 1; ++k) {
+                #pragma HLS unroll
+                for (unsigned i = 0; i < PACK_SIZE; i++) {
+                    #pragma HLS unroll
+                    payload_resend[k][i] = payload_resend[k + 1][i];
+                }
+            }
+
             // Arbiter stage (A) pipeline arbiter, depth = 6
             rotate_priority = next_rotate_priority;
             arbiter_for_read_resp(
                 payload,
-                payload_resend,
+                payload_resend[SF_REG - 1], // as return value
                 valid,
-                resend,
+                resend[SF_REG - 1], // as return value
                 xbar_sel,
                 xbar_valid,
                 rotate_priority

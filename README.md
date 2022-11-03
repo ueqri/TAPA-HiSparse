@@ -1,6 +1,19 @@
 # TAPA-HiSparse
 
 TODO
+
+## Prerequisites
+
+### Basic
+- TAPA framework: 0.0.20220807.1 or later
+- Xilinx Vitis Tool: 2022.1.1
+- Package cnpy: latest
+
+### Hardware-specific
+- FPGA Card: Xilinx Alveo U280
+- Hardware Platform: [xilinx_u280_gen3x16_xdma_base_1](https://docs.xilinx.com/r/en-US/ug1120-alveo-platforms/U280-Gen3x16-XDMA-base_1-Platform)
+- XRT: 2022.1
+
 ## Workflow
 
 ### Hardware
@@ -9,7 +22,7 @@ TODO
 
 2. Run `run_tapa.sh` to start the TAPA and then AutoBridge process. The DSE results will locate on `spmv/run/run-*` directory.
 
-3. Enter `spmv/run/run-*` and run `spmv_generate_bitstream.sh` to synthesize and implement HW.
+3. Enter `spmv/run/run-*` and run `spmv_generate_bitstream.sh` to synthesize and implement HW. (Also, in case you use the TAPA w/o Vitis 2022.1 supports, please run `sed -i 's/pfm_top_i\/dynamic_region/level0_i\/ulp/g' spmv_floorplan.tcl` before generating bitstream.)
 
 4. Build host and benchmark in `spmv/sw` via `make host benchmark`.
 
@@ -17,4 +30,4 @@ TODO
 
 Simply build the host in `spmv/sw` directory via `make host`, and execute host directly.
 
-Note: The environment variable `DATASETS` should be set to the path of datasets, before running `host` or `bench.sh`.
+Note: The environment variable `DATASETS` should be set to the path of datasets, before running `host` or `bench.sh`. The datasets including graph and pruned_nn are available [here](https://drive.google.com/file/d/1VCus77NffWdEfppD5xE6sIIZtx7yNZ6m).
