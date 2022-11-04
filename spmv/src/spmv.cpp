@@ -184,7 +184,7 @@
     }
 
     void CPSR_matrix_loader(
-        tapa::mmap<SPMV_MAT_PKT_T> matrix_hbm,                      // in
+        tapa::async_mmap<SPMV_MAT_PKT_T> &matrix_hbm,                      // in
         unsigned row_partition_idx,                            // in
         unsigned num_col_partitions,                           // in
         unsigned num_partitions,                               // in
@@ -197,8 +197,24 @@
             // read CPSR matadata: partition start and lengths of each stream
             unsigned part_id = row_partition_idx * num_col_partitions + col_partition_idx;
             IDX_T partition_info_idx = 2 * part_id;
-            IDX_T partition_start = matrix_hbm[partition_info_idx].indices.data[0];
-            PACKED_IDX_T part_len_pkt = matrix_hbm[partition_info_idx + 1].indices;
+
+            SPMV_MAT_PKT_T mat_header[2];
+            #pragma HLS array_partition variable=mat_header complete
+            loop_matrix_header_loader:
+            for (unsigned i_req = 0, i_resp = 0; i_resp < 2;) {
+                #pragma HLS pipeline II=1
+                if (i_req < 2 && matrix_hbm.read_addr.try_write(partition_info_idx + i_req)) {
+                    ++i_req;
+                }
+                if (!matrix_hbm.read_data.empty()) {
+                    mat_header[i_resp] = matrix_hbm.read_data.read(nullptr);
+                    ++i_resp;
+                }
+            }
+
+            IDX_T partition_start = mat_header[0].indices.data[0];
+            PACKED_IDX_T part_len_pkt = mat_header[1].indices;
+
             IDX_T stream_length[PACK_SIZE];
             #pragma HLS array_partition variable=stream_length complete
             for (unsigned k = 0; k < PACK_SIZE; k++) {
@@ -221,25 +237,34 @@
                 ML_to_SF_1_stream[k].write(EDGE_PLD_SOD);
             }
 
-            // TODO: maunally control the burst length will help?
+            unsigned base_addr = partition_start + matrix_pkt_offset;
             loop_matrix_loader:
-            for (unsigned i = 0; i < num_reads; i++) {
-                #pragma HLS PIPELINE II=1
-                SPMV_MAT_PKT_T mat_pkt = matrix_hbm[i + partition_start + matrix_pkt_offset];
-                for (unsigned k = 0; k < PACK_SIZE; k++) {
-                    #pragma HLS UNROLL
-                    if (i < stream_length[k]) {
-                        if (mat_pkt.indices.data[k] == IDX_MARKER) {
-                            // Be careful: mat_pkt.vals.data[k] can not be larger than power(2, 8)
-                            row_idx[k] += (PACK_SIZE * mat_pkt.vals.data[k](31, 32-IBITS));
-                        } else {
-                            EDGE_PLD_T input_to_SF_1;
-                            input_to_SF_1.mat_val = mat_pkt.vals.data[k];
-                            input_to_SF_1.col_idx = mat_pkt.indices.data[k];
-                            input_to_SF_1.row_idx = row_idx[k];
-                            ML_to_SF_1_stream[k].write(input_to_SF_1);
+            for (unsigned i_req = 0, i_resp = 0; i_resp < num_reads;) {
+                #pragma HLS pipeline II=1
+
+                if (i_req < num_reads && matrix_hbm.read_addr.try_write(base_addr + i_req)) {
+                    ++i_req;
+                }
+                if (!matrix_hbm.read_data.empty()) {
+                    SPMV_MAT_PKT_T mat_pkt = matrix_hbm.read_data.read(nullptr);
+
+                    for (unsigned k = 0; k < PACK_SIZE; k++) {
+                        #pragma HLS UNROLL
+                        if (i_resp < stream_length[k]) {
+                            if (mat_pkt.indices.data[k] == IDX_MARKER) {
+                                // Be careful: mat_pkt.vals.data[k] can not be larger than power(2, 8)
+                                row_idx[k] += (PACK_SIZE * mat_pkt.vals.data[k](31, 32-IBITS));
+                            } else {
+                                EDGE_PLD_T input_to_SF_1;
+                                input_to_SF_1.mat_val = mat_pkt.vals.data[k];
+                                input_to_SF_1.col_idx = mat_pkt.indices.data[k];
+                                input_to_SF_1.row_idx = row_idx[k];
+                                ML_to_SF_1_stream[k].write(input_to_SF_1);
+                            }
                         }
                     }
+
+                    ++i_resp;
                 }
             }
 
@@ -1398,7 +1423,7 @@
 // vector loader and result draining unit
 
     void vector_loader(
-        tapa::mmap<PACKED_VAL_T> packed_dense_vector,              // in
+        tapa::async_mmap<PACKED_VAL_T> &packed_dense_vector,              // in
         const unsigned num_cols,                              // in
         tapa::ostreams<VEC_AXIS_T, 16> &duplicate                 // out
     ) {
@@ -1430,21 +1455,31 @@
 
             assert(part_len % PACK_SIZE == 0);
 
+            unsigned base_addr = part_id * VB_PER_CLUSTER / PACK_SIZE;
+            unsigned num_reads = part_len / PACK_SIZE;
             loop_load_vector_packets:
-            for (unsigned i = 0; i < part_len / PACK_SIZE; i++) {
+            for (unsigned i_req = 0, i_resp = 0; i_resp < num_reads;) {
                 #pragma HLS pipeline II=1
-                IDX_T dv_idx = i + part_id * VB_PER_CLUSTER / PACK_SIZE;
-                PACKED_VAL_T dv_pkt = packed_dense_vector[dv_idx];
-                VEC_AXIS_T pout[16];
-                for (unsigned x = 0; x < 16; x++) {
-                    #pragma HLS unroll
-                    for (unsigned k = 0; k < PACK_SIZE; k++) {
+
+                if (i_req < num_reads && packed_dense_vector.read_addr.try_write(base_addr + i_req)) {
+                    ++i_req;
+                }
+                if (!packed_dense_vector.read_data.empty()) {
+                    PACKED_VAL_T dv_pkt = packed_dense_vector.read_data.read(nullptr);
+                    unsigned dv_idx = base_addr + i_resp;
+                    ++i_resp;
+
+                    VEC_AXIS_T pout[16];
+                    for (unsigned x = 0; x < 16; x++) {
                         #pragma HLS unroll
-                        VEC_AXIS_VAL(pout[x], k) = VAL_T_BITCAST(dv_pkt.data[k]);
+                        for (unsigned k = 0; k < PACK_SIZE; k++) {
+                            #pragma HLS unroll
+                            VEC_AXIS_VAL(pout[x], k) = VAL_T_BITCAST(dv_pkt.data[k]);
+                        }
+                        pout[x].user = 0;
+                        VEC_AXIS_PKT_IDX(pout[x]) = dv_idx;
+                        duplicate[x].write(pout[x]);
                     }
-                    pout[x].user = 0;
-                    VEC_AXIS_PKT_IDX(pout[x]) = dv_idx;
-                    duplicate[x].write(pout[x]);
                 }
             }
 
@@ -1469,17 +1504,44 @@
         }
     }
 
+
+    void result_drain_fifo_to_gemm(
+        tapa::istream<PACKED_VAL_T> &fifo,
+        tapa::async_mmap<PACKED_VAL_T> &mem,      // out
+        const unsigned row_part_id,
+        const unsigned rows_per_c_in_partition
+    ) {
+        unsigned base_addr = row_part_id * LOGICAL_OB_SIZE / PACK_SIZE;
+        unsigned num_writes = rows_per_c_in_partition * NUM_HBM_CHANNELS / PACK_SIZE;
+
+        loop_write_back_data:
+        for(int i_req = 0, i_resp = 0; i_resp < num_writes;) {
+            #pragma HLS pipeline II=1
+
+            // issue write requests
+            if (i_req < num_writes && !fifo.empty() && !mem.write_addr.full() && !mem.write_data.full()) {
+                mem.write_addr.try_write(base_addr + i_req);
+                mem.write_data.try_write(fifo.read(nullptr));
+                ++i_req;
+            }
+
+            // receive acks of write success
+            if (!mem.write_resp.empty()) {
+                i_resp += unsigned(mem.write_resp.read(nullptr)) + 1;
+            }
+        }
+
+    }
+
     void result_drain(
-        tapa::mmap<PACKED_VAL_T> packed_dense_result,      // out
-        const unsigned row_part_id,             // in
+        tapa::ostream<PACKED_VAL_T> &write_back_data_fifo,      // out
         tapa::istreams<VEC_AXIS_T, 16> &from_clusters     // in
     ) {
         // write back
         char current_input = 0;
         ap_uint<16> finished = 0;
-        unsigned write_counter = 0;
         bool exit = false;
-        unsigned pkt_idx_offset = row_part_id * LOGICAL_OB_SIZE / PACK_SIZE;
+
         result_drain_main_loop:
         while (!exit) {
             #pragma HLS pipeline II=1
@@ -1504,26 +1566,17 @@
 
             exit = finished.and_reduce();
 
-            unsigned abs_pkt_idx = write_counter + pkt_idx_offset;
             if (do_write) {
                 PACKED_VAL_T rout;
                 for (unsigned k = 0; k < PACK_SIZE; k++) {
                     #pragma HLS unroll
                     VAL_T_BITCAST(rout.data[k]) = VEC_AXIS_VAL(pkt, k);
                 }
-                write_counter++;
-                packed_dense_result[abs_pkt_idx] = rout;
+                write_back_data_fifo.write(rout);
             }
-
-    #ifdef RESULT_DRAIN_LINE_TRACING
-            if (do_write) {
-                std::cout << ", written to " << abs_pkt_idx << std::endl;
-            } else {
-                std::cout << std::endl;
-            }
-    #endif
 
         } // while
+
     }
 // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -1556,6 +1609,8 @@ void spmv(
 ) {
     tapa::streams<VEC_AXIS_T, 16, FIFO_DEPTH> vec_dup;
     tapa::streams<VEC_AXIS_T, 16, FIFO_DEPTH> res;
+
+    tapa::stream<PACKED_VAL_T, FIFO_DEPTH> wb_data;
 
     tapa::task()
     .invoke(vector_loader, packed_dense_vector, num_columns, vec_dup)
@@ -1687,7 +1742,12 @@ void spmv(
         num_col_partitions,               // in
         row_partition_idx,          // in
         rows_per_c_in_partition)
-    .invoke(result_drain, packed_dense_result, row_partition_idx, res)
+    .invoke(result_drain, wb_data, res)
+    .invoke(result_drain_fifo_to_gemm,
+        wb_data,
+        packed_dense_result,
+        row_partition_idx,
+        rows_per_c_in_partition)
     ;
 
 } // kernel
