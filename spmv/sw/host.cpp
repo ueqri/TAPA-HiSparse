@@ -454,17 +454,18 @@ bool test_transformer_95_t(std::string bitstream) {
 // main
 //---------------------------------------------------------------
 
+DEFINE_string(bitstream, "", "path to bitstream file, run csim if empty");
+
 int main (int argc, char** argv) {
-    std::string bitstream = argc == 2 ? argv[1] : "";
 
     bool passed = true;
-    passed = passed && test_basic(bitstream);
-    passed = passed && test_basic_sparse(bitstream);
-    passed = passed && test_medium_sparse(bitstream);
-    passed = passed && test_gplus(bitstream);
-    passed = passed && test_ogbl_ppa(bitstream);
-    passed = passed && test_transformer_50_t(bitstream);
-    passed = passed && test_transformer_95_t(bitstream);
+    passed = passed && test_basic(FLAGS_bitstream);
+    passed = passed && test_basic_sparse(FLAGS_bitstream);
+    passed = passed && test_medium_sparse(FLAGS_bitstream);
+    passed = passed && test_gplus(FLAGS_bitstream);
+    passed = passed && test_ogbl_ppa(FLAGS_bitstream);
+    passed = passed && test_transformer_50_t(FLAGS_bitstream);
+    passed = passed && test_transformer_95_t(FLAGS_bitstream);
 
     std::cout << (passed ? "===== All Test Passed! =====" : "===== Test FAILED! =====") << std::endl;
     return passed ? 0 : 1;
