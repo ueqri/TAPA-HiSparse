@@ -51,6 +51,9 @@ typedef struct {
 
 typedef SPMV_MAT_PKT_T SPMSPV_MAT_PKT_T;
 
+typedef ap_uint<PACK_SIZE * 32 * 2> _SPMV_MAT_PKT_T;
+typedef ap_uint<PACK_SIZE * 32> _PACKED_VAL_T;
+
 typedef struct {IDX_T index; VAL_T val;} IDX_VAL_T;
 
 //-------------------------------------------------------------------------

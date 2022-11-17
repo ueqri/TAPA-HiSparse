@@ -12,8 +12,8 @@ tapac \
   --write-only-args "packed_dense_.*" \
   --run-floorplan-dse \
   --enable-synth-util \
+  --enable-hbm-binding-adjustment \
   -o "${WORK_DIR}/spmv.xo" \
-  --floorplan-strategy "QUICK_FLOORPLANNING" \
   --floorplan-output "${WORK_DIR}/spmv_floorplan.tcl" \
   --connectivity ./src/spmv.ini \
   ./src/spmv.cpp

@@ -11,24 +11,24 @@
 #include <tapa.h>
 
 void spmv(
-    tapa::mmap<SPMV_MAT_PKT_T> matrix_hbm_0,       // in
-    tapa::mmap<SPMV_MAT_PKT_T> matrix_hbm_1,       // in
-    tapa::mmap<SPMV_MAT_PKT_T> matrix_hbm_2,       // in
-    tapa::mmap<SPMV_MAT_PKT_T> matrix_hbm_3,       // in
-    tapa::mmap<SPMV_MAT_PKT_T> matrix_hbm_4,       // in
-    tapa::mmap<SPMV_MAT_PKT_T> matrix_hbm_5,       // in
-    tapa::mmap<SPMV_MAT_PKT_T> matrix_hbm_6,       // in
-    tapa::mmap<SPMV_MAT_PKT_T> matrix_hbm_7,       // in
-    tapa::mmap<SPMV_MAT_PKT_T> matrix_hbm_8,       // in
-    tapa::mmap<SPMV_MAT_PKT_T> matrix_hbm_9,       // in
-    tapa::mmap<SPMV_MAT_PKT_T> matrix_hbm_10,      // in
-    tapa::mmap<SPMV_MAT_PKT_T> matrix_hbm_11,      // in
-    tapa::mmap<SPMV_MAT_PKT_T> matrix_hbm_12,      // in
-    tapa::mmap<SPMV_MAT_PKT_T> matrix_hbm_13,      // in
-    tapa::mmap<SPMV_MAT_PKT_T> matrix_hbm_14,      // in
-    tapa::mmap<SPMV_MAT_PKT_T> matrix_hbm_15,      // in
-    tapa::mmap<PACKED_VAL_T> packed_dense_vector,  // in
-    tapa::mmap<PACKED_VAL_T> packed_dense_result,  // out
+    tapa::mmap<_SPMV_MAT_PKT_T> matrix_hbm_0,       // in
+    tapa::mmap<_SPMV_MAT_PKT_T> matrix_hbm_1,       // in
+    tapa::mmap<_SPMV_MAT_PKT_T> matrix_hbm_2,       // in
+    tapa::mmap<_SPMV_MAT_PKT_T> matrix_hbm_3,       // in
+    tapa::mmap<_SPMV_MAT_PKT_T> matrix_hbm_4,       // in
+    tapa::mmap<_SPMV_MAT_PKT_T> matrix_hbm_5,       // in
+    tapa::mmap<_SPMV_MAT_PKT_T> matrix_hbm_6,       // in
+    tapa::mmap<_SPMV_MAT_PKT_T> matrix_hbm_7,       // in
+    tapa::mmap<_SPMV_MAT_PKT_T> matrix_hbm_8,       // in
+    tapa::mmap<_SPMV_MAT_PKT_T> matrix_hbm_9,       // in
+    tapa::mmap<_SPMV_MAT_PKT_T> matrix_hbm_10,      // in
+    tapa::mmap<_SPMV_MAT_PKT_T> matrix_hbm_11,      // in
+    tapa::mmap<_SPMV_MAT_PKT_T> matrix_hbm_12,      // in
+    tapa::mmap<_SPMV_MAT_PKT_T> matrix_hbm_13,      // in
+    tapa::mmap<_SPMV_MAT_PKT_T> matrix_hbm_14,      // in
+    tapa::mmap<_SPMV_MAT_PKT_T> matrix_hbm_15,      // in
+    tapa::mmap<_PACKED_VAL_T> packed_dense_vector,  // in
+    tapa::mmap<_PACKED_VAL_T> packed_dense_result,  // out
     unsigned num_columns,                          // in
     unsigned num_partitions,                       // in
     unsigned num_col_partitions,                   // in
@@ -87,17 +87,27 @@ bool verify(std::vector<float> reference_results,
 }
 
 void unpack_vector(
-    aligned_vector<PACKED_VAL_T> &pdv,
+    aligned_vector<_PACKED_VAL_T> &pdv,
     std::vector<VAL_T> &dv
 ) {
     dv.resize(pdv.size() * PACK_SIZE);
     for (size_t i = 0; i < pdv.size(); i++) {
         for (size_t k = 0; k < PACK_SIZE; k++) {
-            dv[i * PACK_SIZE + k] = pdv[i].data[k];
+            dv[i * PACK_SIZE + k](31,0) = pdv[i](31+32*k, 32*k);
         }
     }
 }
 
+inline _SPMV_MAT_PKT_T bits(SPMV_MAT_PKT_T &mat_pkt) {
+    _SPMV_MAT_PKT_T temp;
+    for (size_t i = 0; i < PACK_SIZE; i++) {
+        temp(31+32*i, 32*i) = mat_pkt.indices.data[i];
+    }
+    for (size_t i = 0; i < PACK_SIZE; i++) {
+        temp(32*PACK_SIZE+31+32*i, 32*PACK_SIZE+32*i) = VAL_T(mat_pkt.vals.data[i])(31,0);
+    }
+    return temp;
+}
 
 
 //---------------------------------------------------------------
@@ -207,21 +217,19 @@ bool spmv_test_harness (
     //--------------------------------------------------------------------
     std::vector<float> vector_f(ext_matrix.num_cols);
     std::generate(vector_f.begin(), vector_f.end(), [&](){return float(rand() % 2);});
-    aligned_vector<PACKED_VAL_T> vector(mat.num_cols / PACK_SIZE);
+    aligned_vector<_PACKED_VAL_T> vector(mat.num_cols / PACK_SIZE);
     for (size_t i = 0; i < vector.size(); i++) {
         for (size_t k = 0; k < PACK_SIZE; k++) {
-            vector[i].data[k] = VAL_T(vector_f[i*PACK_SIZE + k]);
+            vector[i](31+32*k, 32*k) = VAL_T(vector_f[i*PACK_SIZE + k])(31, 0);
         }
     }
 
     //--------------------------------------------------------------------
     // allocate space for results
     //--------------------------------------------------------------------
-    aligned_vector<PACKED_VAL_T> result(mat.num_rows / PACK_SIZE);
+    aligned_vector<_PACKED_VAL_T> result(mat.num_rows / PACK_SIZE);
     for (size_t i = 0; i < result.size(); i++) {
-        for (size_t k = 0; k < PACK_SIZE; k++) {
-            result[i].data[k] = 0;
-        }
+        result[i] = 0;
     }
     std::cout << "INFO : Input/result initialization complete!" << std::endl;
 
@@ -239,6 +247,13 @@ bool spmv_test_harness (
         rows_per_ch_in_last_row_part = mat.num_rows % LOGICAL_OB_SIZE / NUM_HBM_CHANNELS;
     }
 
+    std::vector<aligned_vector<_SPMV_MAT_PKT_T>> _channel_packets(NUM_HBM_CHANNELS);
+    for (size_t i = 0; i < NUM_HBM_CHANNELS; i++) {
+        for (size_t j = 0; j < channel_packets[i].size(); j++) {
+            _channel_packets[i].push_back(bits(channel_packets[i][j]));
+        }
+    }
+
     for (size_t row_part_id = 0; row_part_id < num_row_partitions; row_part_id++) {
         unsigned part_len = LOGICAL_OB_SIZE / NUM_HBM_CHANNELS;
         if (row_part_id == num_row_partitions - 1) {
@@ -249,24 +264,24 @@ bool spmv_test_harness (
 
         double kernel_time_taken_ns
             = tapa::invoke(spmv, bitstream,
-                            tapa::read_only_mmap<SPMV_MAT_PKT_T>(channel_packets[0]),   // in
-                            tapa::read_only_mmap<SPMV_MAT_PKT_T>(channel_packets[1]),   // in
-                            tapa::read_only_mmap<SPMV_MAT_PKT_T>(channel_packets[2]),   // in
-                            tapa::read_only_mmap<SPMV_MAT_PKT_T>(channel_packets[3]),   // in
-                            tapa::read_only_mmap<SPMV_MAT_PKT_T>(channel_packets[4]),   // in
-                            tapa::read_only_mmap<SPMV_MAT_PKT_T>(channel_packets[5]),   // in
-                            tapa::read_only_mmap<SPMV_MAT_PKT_T>(channel_packets[6]),   // in
-                            tapa::read_only_mmap<SPMV_MAT_PKT_T>(channel_packets[7]),   // in
-                            tapa::read_only_mmap<SPMV_MAT_PKT_T>(channel_packets[8]),   // in
-                            tapa::read_only_mmap<SPMV_MAT_PKT_T>(channel_packets[9]),   // in
-                            tapa::read_only_mmap<SPMV_MAT_PKT_T>(channel_packets[10]),  // in
-                            tapa::read_only_mmap<SPMV_MAT_PKT_T>(channel_packets[11]),  // in
-                            tapa::read_only_mmap<SPMV_MAT_PKT_T>(channel_packets[12]),  // in
-                            tapa::read_only_mmap<SPMV_MAT_PKT_T>(channel_packets[13]),  // in
-                            tapa::read_only_mmap<SPMV_MAT_PKT_T>(channel_packets[14]),  // in
-                            tapa::read_only_mmap<SPMV_MAT_PKT_T>(channel_packets[15]),  // in
-                            tapa::read_only_mmap<PACKED_VAL_T>(vector),                 // in
-                            tapa::write_only_mmap<PACKED_VAL_T>(result),                // out
+                            tapa::read_only_mmap<_SPMV_MAT_PKT_T>(_channel_packets[0]),   // in
+                            tapa::read_only_mmap<_SPMV_MAT_PKT_T>(_channel_packets[1]),   // in
+                            tapa::read_only_mmap<_SPMV_MAT_PKT_T>(_channel_packets[2]),   // in
+                            tapa::read_only_mmap<_SPMV_MAT_PKT_T>(_channel_packets[3]),   // in
+                            tapa::read_only_mmap<_SPMV_MAT_PKT_T>(_channel_packets[4]),   // in
+                            tapa::read_only_mmap<_SPMV_MAT_PKT_T>(_channel_packets[5]),   // in
+                            tapa::read_only_mmap<_SPMV_MAT_PKT_T>(_channel_packets[6]),   // in
+                            tapa::read_only_mmap<_SPMV_MAT_PKT_T>(_channel_packets[7]),   // in
+                            tapa::read_only_mmap<_SPMV_MAT_PKT_T>(_channel_packets[8]),   // in
+                            tapa::read_only_mmap<_SPMV_MAT_PKT_T>(_channel_packets[9]),   // in
+                            tapa::read_only_mmap<_SPMV_MAT_PKT_T>(_channel_packets[10]),  // in
+                            tapa::read_only_mmap<_SPMV_MAT_PKT_T>(_channel_packets[11]),  // in
+                            tapa::read_only_mmap<_SPMV_MAT_PKT_T>(_channel_packets[12]),  // in
+                            tapa::read_only_mmap<_SPMV_MAT_PKT_T>(_channel_packets[13]),  // in
+                            tapa::read_only_mmap<_SPMV_MAT_PKT_T>(_channel_packets[14]),  // in
+                            tapa::read_only_mmap<_SPMV_MAT_PKT_T>(_channel_packets[15]),  // in
+                            tapa::read_only_mmap<_PACKED_VAL_T>(vector),                 // in
+                            tapa::write_only_mmap<_PACKED_VAL_T>(result),                // out
                             (unsigned)mat.num_cols,                                     // in
                             (unsigned)num_partitions,                                   // in
                             (unsigned)num_col_partitions,                               // in
