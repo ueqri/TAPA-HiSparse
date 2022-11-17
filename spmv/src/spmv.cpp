@@ -1477,7 +1477,7 @@
 
     void result_drain_fifo_to_mmap(
         tapa::istream<PACKED_VAL_T> &fifo,      // in
-        tapa::mmap<PACKED_VAL_T> mem,           // out
+        tapa::async_mmap<PACKED_VAL_T> &mem,    // out
         const unsigned row_part_id,             // in
         const unsigned rows_per_c_in_partition  // in
     ) {
@@ -1485,10 +1485,22 @@
         const unsigned num_writes = rows_per_c_in_partition * NUM_HBM_CHANNELS / PACK_SIZE;
 
         loop_write_back_data:
-        for (int i = 0; i < num_writes; i++) {
+        for(int i_req = 0, i_resp = 0; i_resp < num_writes;) {
             #pragma HLS pipeline II=1
-            mem[base_addr + i] = fifo.read();
+
+            // issue write requests
+            if (i_req < num_writes && !fifo.empty() && !mem.write_addr.full() && !mem.write_data.full()) {
+                mem.write_addr.try_write(base_addr + i_req);
+                mem.write_data.try_write(fifo.read(nullptr));
+                ++i_req;
+            }
+
+            // receive acks of write success
+            if (!mem.write_resp.empty()) {
+                i_resp += unsigned(mem.write_resp.read(nullptr)) + 1;
+            }
         }
+
     }
 
     void result_drain(
