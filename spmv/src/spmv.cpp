@@ -1474,17 +1474,32 @@
         }
     }
 
+
+    void result_drain_fifo_to_mmap(
+        tapa::istream<PACKED_VAL_T> &fifo,      // in
+        tapa::mmap<PACKED_VAL_T> mem,           // out
+        const unsigned row_part_id,             // in
+        const unsigned rows_per_c_in_partition  // in
+    ) {
+        const unsigned base_addr = row_part_id * LOGICAL_OB_SIZE / PACK_SIZE;
+        const unsigned num_writes = rows_per_c_in_partition * NUM_HBM_CHANNELS / PACK_SIZE;
+
+        loop_write_back_data:
+        for (int i = 0; i < num_writes; i++) {
+            #pragma HLS pipeline II=1
+            mem[base_addr + i] = fifo.read();
+        }
+    }
+
     void result_drain(
-        tapa::mmap<PACKED_VAL_T> packed_dense_result,     // out
-        const unsigned row_part_id,                       // in
-        tapa::istreams<VEC_AXIS_T, 16> &from_clusters     // in
+        tapa::ostream<PACKED_VAL_T> &write_back_data_fifo,      // out
+        tapa::istreams<VEC_AXIS_T, 16> &from_clusters           // in
     ) {
         // write back
         char current_input = 0;
         ap_uint<16> finished = 0;
-        unsigned write_counter = 0;
         bool exit = false;
-        unsigned pkt_idx_offset = row_part_id * LOGICAL_OB_SIZE / PACK_SIZE;
+
         result_drain_main_loop:
         while (!exit) {
             #pragma HLS pipeline II=1
@@ -1509,26 +1524,17 @@
 
             exit = finished.and_reduce();
 
-            unsigned abs_pkt_idx = write_counter + pkt_idx_offset;
             if (do_write) {
                 PACKED_VAL_T rout;
                 for (unsigned k = 0; k < PACK_SIZE; k++) {
                     #pragma HLS unroll
                     rout(31+32*k, 32*k) = VEC_AXIS_VAL(pkt, k);
                 }
-                write_counter++;
-                packed_dense_result[abs_pkt_idx] = rout;
+                write_back_data_fifo.write(rout);
             }
-
-    #ifdef RESULT_DRAIN_LINE_TRACING
-            if (do_write) {
-                std::cout << ", written to " << abs_pkt_idx << std::endl;
-            } else {
-                std::cout << std::endl;
-            }
-    #endif
 
         } // while
+
     }
 // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -1561,6 +1567,8 @@ void spmv(
 ) {
     tapa::streams<VEC_AXIS_T, 16, FIFO_DEPTH> vec_dup;
     tapa::streams<VEC_AXIS_T, 16, FIFO_DEPTH> res;
+
+    tapa::stream<PACKED_VAL_T, FIFO_DEPTH> wb_data;
 
     tapa::task()
     .invoke(vector_loader, packed_dense_vector, num_columns, vec_dup)
@@ -1692,7 +1700,12 @@ void spmv(
         num_col_partitions,               // in
         row_partition_idx,          // in
         rows_per_c_in_partition)
-    .invoke(result_drain, packed_dense_result, row_partition_idx, res)
+    .invoke(result_drain, wb_data, res)
+    .invoke(result_drain_fifo_to_mmap,
+        wb_data,
+        packed_dense_result,
+        row_partition_idx,
+        rows_per_c_in_partition)
     ;
 
 } // kernel
