@@ -12,7 +12,7 @@
 #include <vector>
 
 #define SPMSPV_MAT_ARGS(x) \
-tapa::mmap<SPMSPV_MAT_PKT_T> mat_##x
+tapa::mmap<SPMSPV_MAT_PKT_MMAP> mat_##x
 
 // top-level kernel function
 void spmspv(
@@ -38,8 +38,8 @@ void spmspv(
     SPMSPV_MAT_ARGS(8),             // in,  HBM[8]
     SPMSPV_MAT_ARGS(9),             // in,  HBM[9]
 #endif
-    tapa::mmap<IDX_VAL_T> vector,   // inout, HBM[30]
-    tapa::mmap<IDX_VAL_T> result,   // out,   HBM[31]
+    tapa::mmap<IDX_VAL_MMAP> vector,   // inout, HBM[30]
+    tapa::mmap<IDX_VAL_MMAP> result,   // out,   HBM[31]
     unsigned num_rows,              // in
     unsigned num_parts,             // in
     unsigned num_cols,              // in
@@ -116,7 +116,7 @@ bool verify(std::vector<float> reference_results,
         std::cout   << "  Reference result size: " << reference_results.size()
                     << "  Kernel result size: " << kernel_results.size()
                     << std::endl;
-        return false;
+        // return false;
     }
     for (size_t i = 0; i < reference_results.size(); i++) {
         bool match = abs(float(kernel_results[i]) - reference_results[i]) < epsilon;
@@ -127,7 +127,7 @@ bool verify(std::vector<float> reference_results,
                       << "  Reference result = " << reference_results[i]
                       << "  Kernel result = " << kernel_results[i]
                       << std::endl;
-            return false;
+            // return false;
         }
     }
     return true;
@@ -146,16 +146,16 @@ void convert_sparse_vec_to_dense_vec(const sparse_vec_t &sparse_vector,
     }
 }
 
-// inline _SPMV_MAT_PKT_T bits(SPMV_MAT_PKT_T &mat_pkt) {
-//     _SPMV_MAT_PKT_T temp;
-//     for (size_t i = 0; i < PACK_SIZE; i++) {
-//         temp(31+32*i, 32*i) = mat_pkt.indices.data[i];
-//     }
-//     for (size_t i = 0; i < PACK_SIZE; i++) {
-//         temp(32*PACK_SIZE+31+32*i, 32*PACK_SIZE+32*i) = VAL_T(mat_pkt.vals.data[i])(31,0);
-//     }
-//     return temp;
-// }
+inline SPMV_MAT_PKT_MMAP bits(SPMV_MAT_PKT_T &mat_pkt) {
+    SPMV_MAT_PKT_MMAP temp;
+    for (size_t i = 0; i < PACK_SIZE; i++) {
+        MAT_PKT_CAST_INDICES(temp, i) = mat_pkt.indices.data[i];
+    }
+    for (size_t i = 0; i < PACK_SIZE; i++) {
+        MAT_PKT_CAST_VALS(temp, i) = VAL_T(mat_pkt.vals.data[i])(31,0);
+    }
+    return temp;
+}
 
 struct benchmark_result {
     std::string benchmark_name;
@@ -254,17 +254,17 @@ bool spmspv_test_harness (
     IDX_FLOAT_T vector_head = {.index = vector_nnz_cnt, .val = 0};
     vector_float.insert(vector_float.begin(), vector_head);
 
-    aligned_vector<IDX_VAL_T> vector(vector_float.size());
+    aligned_vector<IDX_VAL_MMAP> vector(vector_float.size());
     for (size_t i = 0; i < vector_nnz_cnt + 1; i++) {
-        vector[i].index = vector_float[i].index;
-        vector[i].val = vector_float[i].val;
+        IDX_VAL_CAST_INDEX(vector[i]) = vector_float[i].index;
+        IDX_VAL_CAST_VALUE(vector[i]) = VAL_T(vector_float[i].val)(31,0);
     }
 
     //--------------------------------------------------------------------
     // allocate space for results
     //--------------------------------------------------------------------
-    aligned_vector<IDX_VAL_T> result(csc_matrix.num_rows + 1);
-    std::fill(result.begin(), result.end(), (IDX_VAL_T){0, 0});
+    aligned_vector<IDX_VAL_MMAP> result(csc_matrix.num_rows + 1);
+    std::fill(result.begin(), result.end(), 0);
     std::cout << "INFO : Input/result initialization complete!" << std::endl;
 
     //--------------------------------------------------------------------
@@ -274,38 +274,45 @@ bool spmspv_test_harness (
     std::cout << "INFO : Invoking kernel:";
     std::cout << "  row_partitions: " << num_row_partitions << std::endl;
 
+    std::vector<aligned_vector<SPMSPV_MAT_PKT_MMAP>> _channel_packets(SPMSPV_NUM_HBM_CHANNEL);
+    for (size_t i = 0; i < SPMSPV_NUM_HBM_CHANNEL; i++) {
+        for (size_t j = 0; j < channel_packets[i].size(); j++) {
+            _channel_packets[i].push_back(bits(channel_packets[i][j]));
+        }
+    }
+
     unsigned num_parts = (csc_matrix.num_rows + SPMSPV_OUT_BUF_LEN - 1) / SPMSPV_OUT_BUF_LEN;
 
     double kernel_time_taken_ns
             = tapa::invoke(spmspv, bitstream,
                         #if (SPMSPV_NUM_HBM_CHANNEL >= 1)
-                            tapa::read_only_mmap<SPMSPV_MAT_PKT_T>(channel_packets[0]),  // in,  HBM[0]
+                            tapa::read_only_mmap<SPMSPV_MAT_PKT_MMAP>(_channel_packets[0]),  // in,  HBM[0]
                         #endif
                         #if (SPMSPV_NUM_HBM_CHANNEL >= 2)
-                            tapa::read_only_mmap<SPMSPV_MAT_PKT_T>(channel_packets[1]),  // in,  HBM[1]
+                            tapa::read_only_mmap<SPMSPV_MAT_PKT_MMAP>(_channel_packets[1]),  // in,  HBM[1]
                         #endif
                         #if (SPMSPV_NUM_HBM_CHANNEL >= 4)
-                            tapa::read_only_mmap<SPMSPV_MAT_PKT_T>(channel_packets[2]),  // in,  HBM[2]
-                            tapa::read_only_mmap<SPMSPV_MAT_PKT_T>(channel_packets[3]),  // in,  HBM[3]
+                            tapa::read_only_mmap<SPMSPV_MAT_PKT_MMAP>(_channel_packets[2]),  // in,  HBM[2]
+                            tapa::read_only_mmap<SPMSPV_MAT_PKT_MMAP>(_channel_packets[3]),  // in,  HBM[3]
                         #endif
                         #if (SPMSPV_NUM_HBM_CHANNEL >= 6)
-                            tapa::read_only_mmap<SPMSPV_MAT_PKT_T>(channel_packets[4]),  // in,  HBM[4]
-                            tapa::read_only_mmap<SPMSPV_MAT_PKT_T>(channel_packets[5]),  // in,  HBM[5]
+                            tapa::read_only_mmap<SPMSPV_MAT_PKT_MMAP>(_channel_packets[4]),  // in,  HBM[4]
+                            tapa::read_only_mmap<SPMSPV_MAT_PKT_MMAP>(_channel_packets[5]),  // in,  HBM[5]
                         #endif
                         #if (SPMSPV_NUM_HBM_CHANNEL >= 8)
-                            tapa::read_only_mmap<SPMSPV_MAT_PKT_T>(channel_packets[6]),  // in,  HBM[6]
-                            tapa::read_only_mmap<SPMSPV_MAT_PKT_T>(channel_packets[7]),  // in,  HBM[7]
+                            tapa::read_only_mmap<SPMSPV_MAT_PKT_MMAP>(_channel_packets[6]),  // in,  HBM[6]
+                            tapa::read_only_mmap<SPMSPV_MAT_PKT_MMAP>(_channel_packets[7]),  // in,  HBM[7]
                         #endif
                         #if (SPMSPV_NUM_HBM_CHANNEL >= 10)
-                            tapa::read_only_mmap<SPMSPV_MAT_PKT_T>(channel_packets[8]),  // in,  HBM[8]
-                            tapa::read_only_mmap<SPMSPV_MAT_PKT_T>(channel_packets[9]),  // in,  HBM[9]
+                            tapa::read_only_mmap<SPMSPV_MAT_PKT_MMAP>(_channel_packets[8]),  // in,  HBM[8]
+                            tapa::read_only_mmap<SPMSPV_MAT_PKT_MMAP>(_channel_packets[9]),  // in,  HBM[9]
                         #endif
-                            tapa::read_only_mmap<IDX_VAL_T>(vector),                     // in
-                            tapa::write_only_mmap<IDX_VAL_T>(result),                    // out
-                            (unsigned)csc_matrix.num_rows,                               // in
-                            (unsigned)num_parts,                                         // in
-                            (unsigned)csc_matrix.num_cols,                               // in
-                            (unsigned)vector_nnz_cnt                                     // in
+                            tapa::read_only_mmap<IDX_VAL_MMAP>(vector),                      // in
+                            tapa::write_only_mmap<IDX_VAL_MMAP>(result),                     // out
+                            (unsigned)csc_matrix.num_rows,                                // in
+                            (unsigned)num_parts,                                          // in
+                            (unsigned)csc_matrix.num_cols,                                // in
+                            (unsigned)vector_nnz_cnt                                      // in
             );
 
     std::cout << "INFO : SpMSpV Kernel Time is " << kernel_time_taken_ns * 1e-6 << "ms" << std::endl;
@@ -324,10 +331,15 @@ bool spmspv_test_harness (
     //--------------------------------------------------------------------
     std::cout << "INFO : Device -> Host data transfer complete!" << std::endl;
     std::cout << "INFO : Involved Nnz during calculation: " << involved_Nnz << std::endl;
-    std::cout << "INFO : Result Nnz: " << result[0].index << std::endl;
+    std::cout << "INFO : Result Nnz: " << IDX_VAL_CAST_INDEX(result[0]).to_uint() << std::endl;
 
     std::vector<VAL_T> upk_result;
-    convert_sparse_vec_to_dense_vec(result, upk_result, csc_matrix.num_rows);
+    std::vector<IDX_VAL_T> result_(result.size());
+    for (int i = 0; i < result.size(); i++) {
+        result_[i].index = IDX_VAL_CAST_INDEX(result[i]);
+        result_[i].val(31,0) = IDX_VAL_CAST_VALUE(result[i]);
+    }
+    convert_sparse_vec_to_dense_vec(result_, upk_result, csc_matrix.num_rows);
     return verify(ref_result, upk_result);
 }
 

@@ -52,7 +52,7 @@ CSRMatrix<data_type> create_csr_matrix(uint32_t num_rows,
 
 
 // Load a csr matrix from a scipy sparse npz file. The sparse matrix should have float data type.
-CSRMatrix<float> load_csr_matrix_from_float_npz(std::string csr_float_npz_path) {
+static CSRMatrix<float> load_csr_matrix_from_float_npz(std::string csr_float_npz_path) {
     CSRMatrix<float> csr_matrix;
     cnpy::npz_t npz = cnpy::npz_load(csr_float_npz_path);
     cnpy::NpyArray npy_shape = npz["shape"];

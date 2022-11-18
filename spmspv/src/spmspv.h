@@ -26,7 +26,7 @@
 
 const unsigned PACK_SIZE = 8;
 
-#define SPMSPV_NUM_HBM_CHANNEL 8
+#define SPMSPV_NUM_HBM_CHANNEL 4
 
 //-------------------------------------------------------------------------
 // basic data types
@@ -50,10 +50,17 @@ PACKED_VAL_T vals;
 
 typedef SPMV_MAT_PKT_T SPMSPV_MAT_PKT_T;
 
-// typedef ap_uint<PACK_SIZE * 32 * 2> SPMV_MAT_PKT_T;
-// typedef ap_uint<PACK_SIZE * 32> PACKED_VAL_T;
-
 typedef struct {IDX_T index; VAL_T val;} IDX_VAL_T;
+
+typedef ap_uint<PACK_SIZE * 32 * 2> SPMV_MAT_PKT_MMAP;
+typedef SPMV_MAT_PKT_MMAP SPMSPV_MAT_PKT_MMAP;
+#define MAT_PKT_CAST_INDICES(p,k) (p(31+32*(k), 32*(k)))
+#define MAT_PKT_CAST_VALS(p,k) (p(31+32*(k)+32*PACK_SIZE, 32*(k)+32*PACK_SIZE))
+
+typedef ap_uint<PACK_SIZE * 32> PACKED_VAL_MMAP;
+typedef ap_uint<32 * 2> IDX_VAL_MMAP;
+#define IDX_VAL_CAST_INDEX(p) (p(31,0))
+#define IDX_VAL_CAST_VALUE(p) (p(63,32))
 
 //-------------------------------------------------------------------------
 // intra-kernel dataflow payload types

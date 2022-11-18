@@ -8,6 +8,7 @@
 
 #include "data_loader.h"
 #include <tapa.h>
+#include <ap_int.h>
 
 using tapa::aligned_allocator;
 

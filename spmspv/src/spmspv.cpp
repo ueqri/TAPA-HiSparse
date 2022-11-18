@@ -6,7 +6,6 @@
 #ifndef __SYNTHESIS__
 #include <iostream>
 #include <iomanip>
-static bool line_tracing_spmspv = false;
 static bool line_tracing_spmspv_load_data = false;
 static bool line_tracing_spmspv_write_back = false;
 #endif
@@ -17,7 +16,7 @@ static bool line_tracing_spmspv_write_back = false;
     // data loader for SpMSpV from one HBM channel
     void load_matrix_from_gmem(
         // |--partptr--|--indptr--|--matrix data--|
-        tapa::mmap<SPMSPV_MAT_PKT_T> matrix,
+        tapa::mmap<SPMSPV_MAT_PKT_MMAP> matrix,
         IDX_T num_parts,
         IDX_T num_cols,
         unsigned channel_id,
@@ -42,8 +41,8 @@ static bool line_tracing_spmspv_write_back = false;
             IDX_T partptr_pack_idx = part_id / (2 * PACK_SIZE);
             IDX_T partptr_pack_pos = part_id % (2 * PACK_SIZE);
             IDX_T mat_data_addr_base = partptr_pack_pos / PACK_SIZE ?
-                matrix[partptr_pack_idx].vals.data[partptr_pack_pos % PACK_SIZE](31,0) :
-                matrix[partptr_pack_idx].indices.data[partptr_pack_pos % PACK_SIZE];
+                MAT_PKT_CAST_VALS(matrix[partptr_pack_idx], partptr_pack_pos % PACK_SIZE) :
+                MAT_PKT_CAST_INDICES(matrix[partptr_pack_idx], partptr_pack_pos % PACK_SIZE);
 
             DL_to_MG_inst.write(SOD); // no need to fill `DL_to_MG_stream` with SOD anymore
 
@@ -71,25 +70,25 @@ static bool line_tracing_spmspv_write_back = false;
                         // CSC index pointers start from `mat_indptr_offset`
                         IDX_T indptr_pack_idx = raw_mat_indptr_idx / (2 * PACK_SIZE);
                         IDX_T indptr_pack_pos = raw_mat_indptr_idx % (2 * PACK_SIZE);
-                        SPMV_MAT_PKT_T pkt = matrix[mat_indptr_offset + indptr_pack_idx];
+                        SPMV_MAT_PKT_MMAP pkt = matrix[mat_indptr_offset + indptr_pack_idx];
                         col_slice[i] = indptr_pack_pos / PACK_SIZE ?
-                            pkt.vals.data[indptr_pack_pos % PACK_SIZE](31,0) :
-                            pkt.indices.data[indptr_pack_pos % PACK_SIZE];
+                            MAT_PKT_CAST_VALS(pkt, indptr_pack_pos % PACK_SIZE) :
+                            MAT_PKT_CAST_INDICES(pkt, indptr_pack_pos % PACK_SIZE);
                     }
 
                     loop_over_pkts_ML:
                     for (unsigned int i = 0; i < (col_slice[1] - col_slice[0]); i++) {
                         #pragma HLS pipeline II=1
-                        SPMSPV_MAT_PKT_T packet_from_mat = matrix[i + mat_data_addr_base + col_slice[0]];
+                        SPMSPV_MAT_PKT_MMAP mat_pkt = matrix[i + mat_data_addr_base + col_slice[0]];
                         DL_to_MG_inst.write(0);
 
                         loop_unpack_ML_unroll:
                         for (unsigned int k = 0; k < PACK_SIZE; k++) {
                             #pragma HLS unroll
                             UPDATE_PLD_T input_to_MG;
-                            input_to_MG.mat_val = packet_from_mat.vals.data[k];
+                            input_to_MG.mat_val(31,0) = MAT_PKT_CAST_VALS(mat_pkt, k);
                             input_to_MG.vec_val = vec_val;
-                            input_to_MG.row_idx = packet_from_mat.indices.data[k] - mat_row_id_base;
+                            input_to_MG.row_idx = MAT_PKT_CAST_INDICES(mat_pkt, k) - mat_row_id_base;
                             input_to_MG.inst = 0;
                             // discard paddings is done in data merger
                             DL_to_MG_stream[k].write(input_to_MG);
@@ -708,7 +707,7 @@ static bool line_tracing_spmspv_write_back = false;
 
     void load_vector_from_gmem(
         // vector data, row_id
-        tapa::mmap<IDX_VAL_T> vector,
+        tapa::mmap<IDX_VAL_MMAP> vector,
         // number of non-zeros
         IDX_T vec_num_nnz,
         // number of matrix rows
@@ -729,9 +728,9 @@ static bool line_tracing_spmspv_write_back = false;
             for (unsigned int vec_nnz_cnt = 0; vec_nnz_cnt < vec_num_nnz; vec_nnz_cnt++) {
                 #pragma HLS pipeline II=1
                 IDX_VAL_INST_T instruction_to_ml;
-                IDX_T index = vector[vec_nnz_cnt + 1].index;
+                IDX_T index = IDX_VAL_CAST_INDEX(vector[vec_nnz_cnt + 1]);
                 instruction_to_ml.index = index / SPMSPV_NUM_HBM_CHANNEL;
-                instruction_to_ml.val = vector[vec_nnz_cnt + 1].val;
+                instruction_to_ml.val(31,0) = IDX_VAL_CAST_VALUE(vector[vec_nnz_cnt + 1]);
                 instruction_to_ml.inst = 0;
                 VL_to_ML_stream[index % SPMSPV_NUM_HBM_CHANNEL].write(instruction_to_ml);
             }
@@ -753,7 +752,7 @@ static bool line_tracing_spmspv_write_back = false;
 
     void write_back_results (
         tapa::istreams<VEC_PLD_T, PACK_SIZE> &PE2WB,
-        tapa::mmap<IDX_VAL_T> result,
+        tapa::mmap<IDX_VAL_MMAP> result,
         IDX_T num_parts
     ) {
         IDX_T nnz_cnt = 0;
@@ -778,11 +777,12 @@ static bool line_tracing_spmspv_write_back = false;
                             current_input = (current_input + 1) % PACK_SIZE; // switch to next pe
                         } else if (pld.inst != SOD && pld.inst != EOD) {
                             IDX_T index = mat_row_id_base + pld.idx;
-                            IDX_VAL_T res_pld;
-                            res_pld.index = index;
-                            res_pld.val = pld.val;
+                            // IDX_VAL_T res_pld;
+                            // res_pld.index = index;
+                            // res_pld.val = pld.val;
                             nnz_cnt++;
-                            result[nnz_cnt] = res_pld;
+                            IDX_VAL_CAST_INDEX(result[nnz_cnt]) = index;
+                            IDX_VAL_CAST_VALUE(result[nnz_cnt]) = pld.val(31,0);
                         }
                     } else {
                         current_input = (current_input + 1) % PACK_SIZE; // switch to next pe
@@ -803,50 +803,30 @@ static bool line_tracing_spmspv_write_back = false;
             mat_row_id_base += SPMSPV_OUT_BUF_LEN;
         }
 
-        result[0] = {.index = nnz_cnt, .val = 0};
+        IDX_VAL_CAST_INDEX(result[0]) = nnz_cnt;
     }
 
 // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-
-// abbreviation for matrix arguments, `x` is the index of HBM channel
-#define SPMSPV_MAT_ARGS(x) \
-tapa::mmap<SPMSPV_MAT_PKT_T> mat_##x
-
 // top-level kernel function
 void spmspv(
-#if (SPMSPV_NUM_HBM_CHANNEL >= 1)
-    SPMSPV_MAT_ARGS(0),             // in,  HBM[0]
-#endif
-#if (SPMSPV_NUM_HBM_CHANNEL >= 2)
-    SPMSPV_MAT_ARGS(1),             // in,  HBM[1]
-#endif
-#if (SPMSPV_NUM_HBM_CHANNEL >= 4)
-    SPMSPV_MAT_ARGS(2),             // in,  HBM[2]
-    SPMSPV_MAT_ARGS(3),             // in,  HBM[3]
-#endif
-#if (SPMSPV_NUM_HBM_CHANNEL >= 6)
-    SPMSPV_MAT_ARGS(4),             // in,  HBM[4]
-    SPMSPV_MAT_ARGS(5),             // in,  HBM[5]
-#endif
-#if (SPMSPV_NUM_HBM_CHANNEL >= 8)
-    SPMSPV_MAT_ARGS(6),             // in,  HBM[6]
-    SPMSPV_MAT_ARGS(7),             // in,  HBM[7]
-#endif
-#if (SPMSPV_NUM_HBM_CHANNEL >= 10)
-    SPMSPV_MAT_ARGS(8),             // in,  HBM[8]
-    SPMSPV_MAT_ARGS(9),             // in,  HBM[9]
-#endif
-    tapa::mmap<IDX_VAL_T> vector,   // inout, HBM[30]
-    tapa::mmap<IDX_VAL_T> result,   // out,   HBM[31]
-    IDX_T num_rows,                 // in
-    IDX_T num_parts,                // in
-    IDX_T num_cols,                 // in
-    IDX_T num_vec_nnz               // in
+    tapa::mmap<SPMSPV_MAT_PKT_MMAP> mat_0, // in,   HBM[0]
+    tapa::mmap<SPMSPV_MAT_PKT_MMAP> mat_1, // in,   HBM[1]
+    tapa::mmap<SPMSPV_MAT_PKT_MMAP> mat_2, // in,   HBM[2]
+    tapa::mmap<SPMSPV_MAT_PKT_MMAP> mat_3, // in,   HBM[3]
+    tapa::mmap<IDX_VAL_MMAP> vector,       // in,   HBM[30]
+    tapa::mmap<IDX_VAL_MMAP> result,       // out,  HBM[31]
+    IDX_T num_rows,                     // in
+    IDX_T num_parts,                    // in
+    IDX_T num_cols,                     // in
+    IDX_T num_vec_nnz                   // in
 ) {
     tapa::streams<IDX_VAL_INST_T, SPMSPV_NUM_HBM_CHANNEL, FIFO_DEPTH> VL2ML;
     tapa::streams<INST_T, SPMSPV_NUM_HBM_CHANNEL, FIFO_DEPTH> ML2MG_inst;
-    tapa::streams<UPDATE_PLD_T, PACK_SIZE, FIFO_DEPTH> ML2MG[SPMSPV_NUM_HBM_CHANNEL];
+    tapa::streams<UPDATE_PLD_T, PACK_SIZE, FIFO_DEPTH> ML2MG_0;
+    tapa::streams<UPDATE_PLD_T, PACK_SIZE, FIFO_DEPTH> ML2MG_1;
+    tapa::streams<UPDATE_PLD_T, PACK_SIZE, FIFO_DEPTH> ML2MG_2;
+    tapa::streams<UPDATE_PLD_T, PACK_SIZE, FIFO_DEPTH> ML2MG_3;
     tapa::streams<UPDATE_PLD_T, PACK_SIZE, FIFO_DEPTH> MG2SF;
     tapa::streams<UPDATE_PLD_T, PACK_SIZE, FIFO_DEPTH> SF2PE;
     tapa::streams<VEC_PLD_T, PACK_SIZE, FIFO_DEPTH> PE2WB;
@@ -858,65 +838,48 @@ void spmspv(
         num_parts,
         VL2ML
     )
-
-#define LOAD_MAT_FROM_HBM(x) \
-.invoke(load_matrix_from_gmem, \
-    mat_##x, \
-    num_parts, \
-    num_cols, \
-    x, \
-    VL2ML[x], \
-    ML2MG_inst[x], \
-    ML2MG[x] \
-)
-
-#if (SPMSPV_NUM_HBM_CHANNEL >= 1)
-    LOAD_MAT_FROM_HBM(0)
-#endif
-#if (SPMSPV_NUM_HBM_CHANNEL >= 2)
-    LOAD_MAT_FROM_HBM(1)
-#endif
-#if (SPMSPV_NUM_HBM_CHANNEL >= 4)
-    LOAD_MAT_FROM_HBM(2)
-    LOAD_MAT_FROM_HBM(3)
-#endif
-#if (SPMSPV_NUM_HBM_CHANNEL >= 6)
-    LOAD_MAT_FROM_HBM(4)
-    LOAD_MAT_FROM_HBM(5)
-#endif
-#if (SPMSPV_NUM_HBM_CHANNEL >= 8)
-    LOAD_MAT_FROM_HBM(6)
-    LOAD_MAT_FROM_HBM(7)
-#endif
-#if (SPMSPV_NUM_HBM_CHANNEL >= 10)
-    LOAD_MAT_FROM_HBM(8)
-    LOAD_MAT_FROM_HBM(9)
-#endif
-
+    .invoke(load_matrix_from_gmem,
+        mat_0,
+        num_parts,
+        num_cols,
+        0,
+        VL2ML[0],
+        ML2MG_inst[0],
+        ML2MG_0
+    )
+    .invoke(load_matrix_from_gmem,
+        mat_1,
+        num_parts,
+        num_cols,
+        1,
+        VL2ML[1],
+        ML2MG_inst[1],
+        ML2MG_1
+    )
+    .invoke(load_matrix_from_gmem,
+        mat_2,
+        num_parts,
+        num_cols,
+        2,
+        VL2ML[2],
+        ML2MG_inst[2],
+        ML2MG_2
+    )
+    .invoke(load_matrix_from_gmem,
+        mat_3,
+        num_parts,
+        num_cols,
+        3,
+        VL2ML[3],
+        ML2MG_inst[3],
+        ML2MG_3
+    )
     .invoke(merge_load_streams,
         ML2MG_inst,
-#if (SPMSPV_NUM_HBM_CHANNEL >= 1)
-        ML2MG[0],
-#endif
-#if (SPMSPV_NUM_HBM_CHANNEL >= 2)
-        ML2MG[1],
-#endif
-#if (SPMSPV_NUM_HBM_CHANNEL >= 4)
-        ML2MG[2],
-        ML2MG[3],
-#endif
-#if (SPMSPV_NUM_HBM_CHANNEL >= 6)
-        ML2MG[4],
-        ML2MG[5],
-#endif
-#if (SPMSPV_NUM_HBM_CHANNEL >= 8)
-        ML2MG[6],
-        ML2MG[7],
-#endif
-#if (SPMSPV_NUM_HBM_CHANNEL >= 10)
-        ML2MG[8],
-        ML2MG[9],
-#endif
+        ML2MG_0,
+        ML2MG_1,
+        ML2MG_2,
+        ML2MG_3,
         MG2SF,
         num_parts
     ).invoke(shuffler_read_resp,

@@ -2,7 +2,7 @@ PROJ_ROOT = ..
 
 CXX := g++
 
-CXXFLAGS += -Wall -std=c++14
+CXXFLAGS += -Wall -std=c++17
 CXXFLAGS += -I$(PROJ_ROOT)/sw/include -I$(PROJ_ROOT)/src
 LDFLAGS += -lrt -lstdc++ -ltapa -lfrt -lglog -lgflags -lOpenCL
 
