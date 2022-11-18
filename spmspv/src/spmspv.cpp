@@ -810,23 +810,61 @@ static bool line_tracing_spmspv_write_back = false;
 
 // top-level kernel function
 void spmspv(
-    tapa::mmap<SPMSPV_MAT_PKT_MMAP> mat_0, // in,   HBM[0]
-    tapa::mmap<SPMSPV_MAT_PKT_MMAP> mat_1, // in,   HBM[1]
-    tapa::mmap<SPMSPV_MAT_PKT_MMAP> mat_2, // in,   HBM[2]
-    tapa::mmap<SPMSPV_MAT_PKT_MMAP> mat_3, // in,   HBM[3]
-    tapa::mmap<IDX_VAL_MMAP> vector,       // in,   HBM[30]
-    tapa::mmap<IDX_VAL_MMAP> result,       // out,  HBM[31]
-    IDX_T num_rows,                     // in
-    IDX_T num_parts,                    // in
-    IDX_T num_cols,                     // in
-    IDX_T num_vec_nnz                   // in
+#if (SPMSPV_NUM_HBM_CHANNEL >= 1)
+    tapa::mmap<SPMSPV_MAT_PKT_MMAP> mat_0,  // in,   HBM[0]
+#endif
+#if (SPMSPV_NUM_HBM_CHANNEL >= 2)
+    tapa::mmap<SPMSPV_MAT_PKT_MMAP> mat_1,  // in,   HBM[1]
+#endif
+#if (SPMSPV_NUM_HBM_CHANNEL >= 4)
+    tapa::mmap<SPMSPV_MAT_PKT_MMAP> mat_2,  // in,   HBM[2]
+    tapa::mmap<SPMSPV_MAT_PKT_MMAP> mat_3,  // in,   HBM[3]
+#endif
+#if (SPMSPV_NUM_HBM_CHANNEL >= 6)
+    tapa::mmap<SPMSPV_MAT_PKT_MMAP> mat_4,  // in,   HBM[4]
+    tapa::mmap<SPMSPV_MAT_PKT_MMAP> mat_5,  // in,   HBM[5]
+#endif
+#if (SPMSPV_NUM_HBM_CHANNEL >= 8)
+    tapa::mmap<SPMSPV_MAT_PKT_MMAP> mat_6,  // in,   HBM[6]
+    tapa::mmap<SPMSPV_MAT_PKT_MMAP> mat_7,  // in,   HBM[7]
+#endif
+#if (SPMSPV_NUM_HBM_CHANNEL >= 10)
+    tapa::mmap<SPMSPV_MAT_PKT_MMAP> mat_8,  // in,   HBM[8]
+    tapa::mmap<SPMSPV_MAT_PKT_MMAP> mat_9,  // in,   HBM[9]
+#endif
+    tapa::mmap<IDX_VAL_MMAP> vector,        // in,   HBM[30]
+    tapa::mmap<IDX_VAL_MMAP> result,        // out,  HBM[31]
+    IDX_T num_rows,                         // in
+    IDX_T num_parts,                        // in
+    IDX_T num_cols,                         // in
+    IDX_T num_vec_nnz                       // in
 ) {
     tapa::streams<IDX_VAL_INST_T, SPMSPV_NUM_HBM_CHANNEL, FIFO_DEPTH> VL2ML;
     tapa::streams<INST_T, SPMSPV_NUM_HBM_CHANNEL, FIFO_DEPTH> ML2MG_inst;
+    // Note: tapa::streams<> array[N] is not valid for tapac flow, even through
+    //       it passes sw_emu.
+#if (SPMSPV_NUM_HBM_CHANNEL >= 1)
     tapa::streams<UPDATE_PLD_T, PACK_SIZE, FIFO_DEPTH> ML2MG_0;
+#endif
+#if (SPMSPV_NUM_HBM_CHANNEL >= 2)
     tapa::streams<UPDATE_PLD_T, PACK_SIZE, FIFO_DEPTH> ML2MG_1;
+#endif
+#if (SPMSPV_NUM_HBM_CHANNEL >= 4)
     tapa::streams<UPDATE_PLD_T, PACK_SIZE, FIFO_DEPTH> ML2MG_2;
     tapa::streams<UPDATE_PLD_T, PACK_SIZE, FIFO_DEPTH> ML2MG_3;
+#endif
+#if (SPMSPV_NUM_HBM_CHANNEL >= 6)
+    tapa::streams<UPDATE_PLD_T, PACK_SIZE, FIFO_DEPTH> ML2MG_4;
+    tapa::streams<UPDATE_PLD_T, PACK_SIZE, FIFO_DEPTH> ML2MG_5;
+#endif
+#if (SPMSPV_NUM_HBM_CHANNEL >= 8)
+    tapa::streams<UPDATE_PLD_T, PACK_SIZE, FIFO_DEPTH> ML2MG_6;
+    tapa::streams<UPDATE_PLD_T, PACK_SIZE, FIFO_DEPTH> ML2MG_7;
+#endif
+#if (SPMSPV_NUM_HBM_CHANNEL >= 10)
+    tapa::streams<UPDATE_PLD_T, PACK_SIZE, FIFO_DEPTH> ML2MG_8;
+    tapa::streams<UPDATE_PLD_T, PACK_SIZE, FIFO_DEPTH> ML2MG_9;
+#endif
     tapa::streams<UPDATE_PLD_T, PACK_SIZE, FIFO_DEPTH> MG2SF;
     tapa::streams<UPDATE_PLD_T, PACK_SIZE, FIFO_DEPTH> SF2PE;
     tapa::streams<VEC_PLD_T, PACK_SIZE, FIFO_DEPTH> PE2WB;
@@ -838,6 +876,7 @@ void spmspv(
         num_parts,
         VL2ML
     )
+#if (SPMSPV_NUM_HBM_CHANNEL >= 1)
     .invoke(load_matrix_from_gmem,
         mat_0,
         num_parts,
@@ -847,6 +886,8 @@ void spmspv(
         ML2MG_inst[0],
         ML2MG_0
     )
+#endif
+#if (SPMSPV_NUM_HBM_CHANNEL >= 2)
     .invoke(load_matrix_from_gmem,
         mat_1,
         num_parts,
@@ -856,6 +897,8 @@ void spmspv(
         ML2MG_inst[1],
         ML2MG_1
     )
+#endif
+#if (SPMSPV_NUM_HBM_CHANNEL >= 4)
     .invoke(load_matrix_from_gmem,
         mat_2,
         num_parts,
@@ -874,12 +917,91 @@ void spmspv(
         ML2MG_inst[3],
         ML2MG_3
     )
+#endif
+#if (SPMSPV_NUM_HBM_CHANNEL >= 6)
+    .invoke(load_matrix_from_gmem,
+        mat_4,
+        num_parts,
+        num_cols,
+        4,
+        VL2ML[4],
+        ML2MG_inst[4],
+        ML2MG_4
+    )
+    .invoke(load_matrix_from_gmem,
+        mat_5,
+        num_parts,
+        num_cols,
+        5,
+        VL2ML[5],
+        ML2MG_inst[5],
+        ML2MG_5
+    )
+#endif
+#if (SPMSPV_NUM_HBM_CHANNEL >= 8)
+    .invoke(load_matrix_from_gmem,
+        mat_6,
+        num_parts,
+        num_cols,
+        6,
+        VL2ML[6],
+        ML2MG_inst[6],
+        ML2MG_6
+    )
+    .invoke(load_matrix_from_gmem,
+        mat_7,
+        num_parts,
+        num_cols,
+        7,
+        VL2ML[7],
+        ML2MG_inst[7],
+        ML2MG_7
+    )
+#endif
+#if (SPMSPV_NUM_HBM_CHANNEL >= 10)
+    .invoke(load_matrix_from_gmem,
+        mat_8,
+        num_parts,
+        num_cols,
+        8,
+        VL2ML[8],
+        ML2MG_inst[8],
+        ML2MG_8
+    )
+    .invoke(load_matrix_from_gmem,
+        mat_9,
+        num_parts,
+        num_cols,
+        9,
+        VL2ML[9],
+        ML2MG_inst[9],
+        ML2MG_9
+    )
+#endif
     .invoke(merge_load_streams,
         ML2MG_inst,
+#if (SPMSPV_NUM_HBM_CHANNEL >= 1)
         ML2MG_0,
+#endif
+#if (SPMSPV_NUM_HBM_CHANNEL >= 2)
         ML2MG_1,
+#endif
+#if (SPMSPV_NUM_HBM_CHANNEL >= 4)
         ML2MG_2,
         ML2MG_3,
+#endif
+#if (SPMSPV_NUM_HBM_CHANNEL >= 6)
+        ML2MG_4,
+        ML2MG_5,
+#endif
+#if (SPMSPV_NUM_HBM_CHANNEL >= 8)
+        ML2MG_6,
+        ML2MG_7,
+#endif
+#if (SPMSPV_NUM_HBM_CHANNEL >= 10)
+        ML2MG_8,
+        ML2MG_9,
+#endif
         MG2SF,
         num_parts
     ).invoke(shuffler_read_resp,
