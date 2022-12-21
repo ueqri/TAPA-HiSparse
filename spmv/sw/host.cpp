@@ -367,9 +367,8 @@ spmv_::io::CSRMatrix<float> create_uniform_sparse_CSR (
 //---------------------------------------------------------------
 // test cases
 //---------------------------------------------------------------
-std::string DATASET_DIR = std::getenv("DATASETS");
-std::string GRAPH_DATASET_DIR = DATASET_DIR + "/graph/";
-std::string NN_DATASET_DIR = DATASET_DIR + "/pruned_nn/";
+#define GRAPH_DATASET_DIR (std::string(std::getenv("DATASETS")) + "/graph/")
+#define NN_DATASET_DIR (std::string(std::getenv("DATASETS")) + "/pruned_nn/")
 
 bool test_basic(std::string bitstream) {
     std::cout << "------ Running test: on basic dense matrix " << std::endl;
@@ -477,10 +476,13 @@ int main (int argc, char** argv) {
     passed = passed && test_basic(FLAGS_bitstream);
     passed = passed && test_basic_sparse(FLAGS_bitstream);
     passed = passed && test_medium_sparse(FLAGS_bitstream);
-    passed = passed && test_gplus(FLAGS_bitstream);
-    passed = passed && test_ogbl_ppa(FLAGS_bitstream);
-    passed = passed && test_transformer_50_t(FLAGS_bitstream);
-    passed = passed && test_transformer_95_t(FLAGS_bitstream);
+
+    if (std::getenv("DATASETS")) {
+        passed = passed && test_gplus(FLAGS_bitstream);
+        passed = passed && test_ogbl_ppa(FLAGS_bitstream);
+        passed = passed && test_transformer_50_t(FLAGS_bitstream);
+        passed = passed && test_transformer_95_t(FLAGS_bitstream);
+    }
 
     std::cout << (passed ? "===== All Test Passed! =====" : "===== Test FAILED! =====") << std::endl;
     return passed ? 0 : 1;

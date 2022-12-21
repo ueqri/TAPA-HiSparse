@@ -6,7 +6,8 @@
 #include <iostream>
 #include <fstream>
 #include <iomanip>
-#include <assert.h>
+#include <cassert>
+#include <cstdlib>
 
 #include <gflags/gflags.h>
 #include <tapa.h>
@@ -367,7 +368,10 @@ benchmark_result spmv_test_harness (
 //---------------------------------------------------------------
 
 int main (int argc, char** argv) {
-    // ./benchmark <dataset_name> <dataset_path> <hw_xclbin> <log_path>
+    if (argc != 5) {
+        std::cout << "Usage: ./benchmark <dataset_name> <dataset_path> <hw_xclbin> <log_path>" << std::endl;
+        return EXIT_FAILURE;
+    }
     std::string name = argv[1], dataset = argv[2], bitstream = argv[3], metric = argv[4];
 
     std::cout << "------ Running test: on " << name << std::endl;

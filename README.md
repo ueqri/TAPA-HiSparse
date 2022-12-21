@@ -1,10 +1,10 @@
 # TAPA-HiSparse
 
-[HiSparse](https://github.com/cornell-zhang/HiSparse) is a HLS library which targets High-performance Sparse Linear Algebra, such as SpMV. Compared to the version in FPGA'22, current HiSparse is enhanced in many levels such as portability and compatibility (for latest vendor tool), and also equipped with a multi-HBM SpMSpV as a new case study.
+[HiSparse](https://github.com/cornell-zhang/HiSparse) is a HLS library which targets High-performance Sparse Linear Algebra, such as SpMV. Compared to the version in FPGA'22, current HiSparse is enhanced in many levels such as portability and compatibility (for latest vendor tool), and also equipped with a **[multi-HBM SpMSpV](https://github.com/ueqri/TAPA-HiSparse/tree/main/spmspv) as a new case study**.
 
 [TAPA](https://github.com/UCLA-VAST/tapa) is a dataflow HLS framework from [UCLA VAST](https://vast.cs.ucla.edu/) group, which features fast compilation, expressive programming model and generates high-frequency FPGA accelerators.
 
-This project aims to port HiSparse library from vanilla Vitis HLS to TAPA framework, to exert [AutoBridge](https://github.com/UCLA-VAST/AutoBridge) workflow for better floorplan quality and pipelining; we can eventually get much higher frequency and thus higher throughput for sparse computing. Further works still focus on improving HiSparse frequency & scalability (scale to more HBM channels), and on the integration to [GraphLily](https://github.com/cornell-zhang/GraphLily) (already have some milestones [here](https://github.com/cornell-zhang/GraphLily/commits/hang_integration)).
+This project aims to migrate the latest HiSparse library from vanilla Vitis HLS to TAPA framework, to exert [AutoBridge](https://github.com/UCLA-VAST/AutoBridge) workflow for better floorplan quality and pipelining; in this way, we could get higher frequency and thus higher throughput for sparse computing. Further works still focus on improving HiSparse frequency & scalability (scale to more HBM channels), and the integration to [GraphLily](https://github.com/cornell-zhang/GraphLily) (already have some milestones [here](https://github.com/cornell-zhang/GraphLily/tree/hang_integration)).
 
 ## Prerequisites
 
@@ -34,4 +34,5 @@ This project aims to port HiSparse library from vanilla Vitis HLS to TAPA framew
 
 Simply build the host in `spmv/sw` directory via `make host`, and execute host directly.
 
-Note: The environment variable `DATASETS` should be set to the path of datasets, before running `host` or `bench.sh`. The datasets including graph and pruned_nn are available [here](https://drive.google.com/file/d/1VCus77NffWdEfppD5xE6sIIZtx7yNZ6m).
+### Note
+The environment variable `DATASETS` should be set to the path of datasets (e.g., googleplus, ogbl-ppa, etc.) before running `host` or `bench.sh`. The datasets including graph and pruned_nn are available [here](https://drive.google.com/file/d/1VCus77NffWdEfppD5xE6sIIZtx7yNZ6m).
