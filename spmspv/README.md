@@ -6,6 +6,8 @@ We accelerated SpMSpV on HBM-Equipped FPGAs using the following architecture and
 
 ![spmspv_xcel_arch](https://user-images.githubusercontent.com/56567688/210109265-dc0ee806-ed7e-422f-b1df-86cf6f2f88d3.svg)
 
+## Brief Description
+
 ### Vector Loader
 
 Load the *sparse* vector from device HBM memory, and feed the loaded element into a certain matrix loader (determined by the column index of the element).
@@ -29,3 +31,7 @@ Multiply the incoming non-zero value from the matrix with the corresponding vect
 ### Result Drain Unit
 
 Collect outputs from the PEs and write the results into the device HBM memory.
+
+## Others
+
+For how to build and run the accelerator, please refer to the root [README.md](../README.md) for detailed steps.
